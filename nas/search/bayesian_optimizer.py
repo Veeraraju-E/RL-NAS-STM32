@@ -1,62 +1,114 @@
 import sys
 from pathlib import Path
+import torch
+from bayes_opt import BayesianOptimization
 
-# Add the parent directory to system path
 current_dir = Path(__file__).resolve().parent
 parent_dir = current_dir.parent
 sys.path.append(str(parent_dir))
 
 from search.base_searcher import BaseSearcher
-import GPyOpt
 
 
 class BayesianSearcher(BaseSearcher):
-    def __init__(self, search_space, hardware_constraints, evaluator):
+    def __init__(self, search_space, hardware_constraints, evaluator, device):
         super().__init__(search_space, hardware_constraints)
-        self.bounds = self._create_bounds()
         self.evaluator = evaluator
+        self.device = device
+        self.param_bounds = self._create_bounds()
         
     def search(self, num_iterations):
-        optimizer = GPyOpt.methods.BayesianOptimization(
+        """Execute Bayesian optimization search"""
+        optimizer = BayesianOptimization(
             f=self._objective_function,
-            domain=self.bounds,
-            model_type='GP',
-            acquisition_type='EI',
-            maximize=True,
-            normalize_Y=True
+            pbounds=self.param_bounds,
+            verbose=2,
+            random_state=42
         )
         
-        optimizer.run_optimization(max_iter=num_iterations)
-        self.best_architecture = self._convert_to_arch_params(optimizer.x_opt)
-        self.best_score = optimizer.fx_opt
+        optimizer.set_gp_params(kernel=None, alpha=1e-6)
+        
+        init_points = min(5, num_iterations // 2)
+        remaining_iter = num_iterations - init_points
+        
+        print(f"\nInitializing with {init_points} random points...")
+        optimizer.maximize(
+            init_points=init_points,
+            n_iter=0,
+        )
+        
+        print(f"\nRunning Bayesian optimization for {remaining_iter} iterations...")
+        optimizer.maximize(
+            init_points=0,
+            n_iter=remaining_iter,
+        )
+        
+        best_params = optimizer.max['params']
+        self.best_score = optimizer.max['target']
+        self.best_architecture = self._convert_to_arch_params(best_params)
+        
         return self.best_architecture
     
-    def _objective_function(self, x):
-        """Convert GPyOpt parameters to architecture and evaluate"""
-        arch_params = self._convert_to_arch_params(x[0])
-        score = self.evaluator.evaluate_architecture(arch_params)
-        return -score  # GPyOpt minimizes, so we negate the score
+    def _objective_function(self, **params):
+        """Objective function for Bayesian optimization"""
+        try:
+            arch_params = self._convert_to_arch_params(params)
+            
+            # Validate architecture parameters
+            if not self._validate_architecture(arch_params):
+                return 0.0
+            
+            arch_params = {
+                k: v.to(self.device) if isinstance(v, torch.Tensor) else v 
+                for k, v in arch_params.items()
+            }
+            
+            score = self.evaluator.evaluate_architecture(arch_params)
+            return score
+        except Exception as e:
+            print(f"Error in objective function: {e}")
+            return 0.0
     
-    def _convert_to_arch_params(self, x):
+    def _convert_to_arch_params(self, params):
         """Convert optimization parameters to architecture parameters"""
-        params = {}
-        for i, (param_name, values) in enumerate(self.search_space.items()):
-            # Round continuous parameters that must be integers
-            if param_name in ['num_layers', 'hidden_size', 'num_heads', 'ff_dim', 'vocab_size', 'quantization_bits']:
-                params[param_name] = round(x[i])
+        arch_params = {}
+        for param_name, value in params.items():
+            if param_name in ['num_layers', 'hidden_size', 'num_heads', 
+                            'ff_dim', 'vocab_size', 'quantization_bits']:
+                # Round to nearest valid value
+                if param_name == 'hidden_size':
+                    # Ensure hidden_size is divisible by maximum num_heads
+                    max_heads = max(self.search_space['num_heads'])
+                    value = round(value / max_heads) * max_heads
+                elif param_name == 'num_heads':
+                    value = round(value)
+                    # Ensure num_heads divides hidden_size
+                    hidden_size = round(params['hidden_size'])
+                    value = max(1, min(value, hidden_size))
+                else:
+                    value = round(value)
+                arch_params[param_name] = value
             else:
-                params[param_name] = x[i]
-        return params
-        
+                arch_params[param_name] = value
+        return arch_params
+    
+    def _validate_architecture(self, arch_params):
+        """Validate architecture parameters"""
+        try:
+            hidden_size = arch_params['hidden_size']
+            num_heads = arch_params['num_heads']
+            return (hidden_size % num_heads == 0 and
+                   num_heads > 0 and
+                   hidden_size > 0)
+        except Exception:
+            return False
+    
     def _create_bounds(self):
-        # Convert search space to GPyOpt format
-        bounds = []
+        """Convert search space to bayes_opt format"""
+        bounds = {}
         for param, values in self.search_space.items():
             if isinstance(values, tuple):
-                bounds.append({'name': param, 'type': 'continuous',
-                             'domain': values})
+                bounds[param] = values
             else:
-                bounds.append({'name': param, 'type': 'discrete',
-                             'domain': values})
+                bounds[param] = (min(values), max(values))
         return bounds
-

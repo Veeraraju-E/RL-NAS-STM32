@@ -1,4 +1,5 @@
 torch
 torchtext
 matplotlib
-GPYOpt
+bayesian-optimization
+wandb
