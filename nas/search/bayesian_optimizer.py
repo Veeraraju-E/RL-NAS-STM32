@@ -1,6 +1,9 @@
 import sys
 from pathlib import Path
 import torch
+import json
+import logging
+from datetime import datetime
 from bayes_opt import BayesianOptimization
 
 current_dir = Path(__file__).resolve().parent
@@ -16,9 +19,16 @@ class BayesianSearcher(BaseSearcher):
         self.evaluator = evaluator
         self.device = device
         self.param_bounds = self._create_bounds()
+        self.search_history = []
+        self.best_architectures = []  # Keep track of top N architectures
         
     def search(self, num_iterations):
         """Execute Bayesian optimization search"""
+        # Create output directory for logging
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.output_dir = Path("search_results") / timestamp
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        
         optimizer = BayesianOptimization(
             f=self._objective_function,
             pbounds=self.param_bounds,
@@ -31,21 +41,25 @@ class BayesianSearcher(BaseSearcher):
         init_points = min(5, num_iterations // 2)
         remaining_iter = num_iterations - init_points
         
-        print(f"\nInitializing with {init_points} random points...")
+        logging.info(f"\nInitializing with {init_points} random points...")
         optimizer.maximize(
             init_points=init_points,
             n_iter=0,
         )
         
-        print(f"\nRunning Bayesian optimization for {remaining_iter} iterations...")
+        logging.info(f"\nRunning Bayesian optimization for {remaining_iter} iterations...")
         optimizer.maximize(
             init_points=0,
             n_iter=remaining_iter,
         )
         
+        # Save final results
         best_params = optimizer.max['params']
         self.best_score = optimizer.max['target']
         self.best_architecture = self._convert_to_arch_params(best_params)
+        
+        # Save search history and best architectures
+        self._save_results()
         
         return self.best_architecture
     
@@ -64,9 +78,25 @@ class BayesianSearcher(BaseSearcher):
             }
             
             score = self.evaluator.evaluate_architecture(arch_params)
+            
+            # Log this trial
+            trial_info = {
+                'architecture': arch_params,
+                'score': score,
+                'timestamp': datetime.now().isoformat()
+            }
+            self.search_history.append(trial_info)
+            
+            # Update best architectures list
+            self._update_best_architectures(arch_params, score)
+            
+            # Log current trial
+            logging.info(f"\nTrial architecture: {arch_params}")
+            logging.info(f"Trial score: {score:.4f}")
+            
             return score
         except Exception as e:
-            print(f"Error in objective function: {e}")
+            logging.error(f"Error in objective function: {e}")
             return 0.0
     
     def _convert_to_arch_params(self, params):
@@ -112,3 +142,32 @@ class BayesianSearcher(BaseSearcher):
             else:
                 bounds[param] = (min(values), max(values))
         return bounds
+    
+    def _update_best_architectures(self, architecture, score, top_k=5):
+        """Keep track of top K architectures"""
+        self.best_architectures.append({
+            'architecture': architecture,
+            'score': score,
+            'timestamp': datetime.now().isoformat()
+        })
+        # Sort by score and keep top K
+        self.best_architectures.sort(key=lambda x: x['score'], reverse=True)
+        self.best_architectures = self.best_architectures[:top_k]
+    
+    def _save_results(self):
+        """Save search results to files"""
+        # Save search history
+        with open(self.output_dir / 'search_history.json', 'w') as f:
+            json.dump(self.search_history, f, indent=2)
+        
+        # Save best architectures
+        with open(self.output_dir / 'best_architectures.json', 'w') as f:
+            json.dump(self.best_architectures, f, indent=2)
+        
+        # Save best architecture separately
+        with open(self.output_dir / 'best_architecture.json', 'w') as f:
+            json.dump({
+                'architecture': self.best_architecture,
+                'score': self.best_score,
+                'timestamp': datetime.now().isoformat()
+            }, f, indent=2)
