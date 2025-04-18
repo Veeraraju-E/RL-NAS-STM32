@@ -73,6 +73,15 @@ class ModelEvaluator:
             model.train()
             total_loss = 0
             for batch_idx, (x, y) in enumerate(self.train_loader):
+                # Ensure input matches model's sequence length
+                if x.size(1) > model.seq_length:
+                    x = x[:, :model.seq_length]
+                    y = y[:, :model.seq_length]
+                elif x.size(1) < model.seq_length:
+                    pad_size = model.seq_length - x.size(1)
+                    x = torch.nn.functional.pad(x, (0, pad_size), value=0)
+                    y = torch.nn.functional.pad(y, (0, pad_size), value=0)
+                
                 x, y = x.to(self.device), y.to(self.device)
                 optimizer.zero_grad()
                 output = model(x)
@@ -84,7 +93,6 @@ class ModelEvaluator:
                 if batch_idx % 100 == 0:
                     print(f'Epoch: {epoch}, Batch: {batch_idx}, Loss: {loss.item():.4f}')
 
-            
             # Evaluation phase
             model.eval()
             correct = 0
@@ -92,17 +100,24 @@ class ModelEvaluator:
             val_loss = 0
             with torch.no_grad():
                 for x, y in self.val_loader:
+                    # Apply same sequence length handling for validation
+                    if x.size(1) > model.seq_length:
+                        x = x[:, :model.seq_length]
+                        y = y[:, :model.seq_length]
+                    elif x.size(1) < model.seq_length:
+                        pad_size = model.seq_length - x.size(1)
+                        x = torch.nn.functional.pad(x, (0, pad_size), value=0)
+                        y = torch.nn.functional.pad(y, (0, pad_size), value=0)
+                    
                     x, y = x.to(self.device), y.to(self.device)
                     output = model(x)
                     val_loss += F.cross_entropy(output.view(-1, output.size(-1)), y.view(-1)).item()
-                    _, predicted = output.max(1)
-                    total += y.size(0)
+                    _, predicted = output.max(-1)
+                    total += y.size(0) * y.size(1)
                     correct += (predicted == y).sum().item()
             
             accuracy = correct / total
             best_accuracy = max(best_accuracy, accuracy)
-
-            
             print(f'Epoch: {epoch}, Accuracy: {accuracy:.4f}')
         
         return best_accuracy
@@ -143,3 +158,4 @@ class ModelEvaluator:
         total_params = embedding_params + transformer_params
         size_bytes = (total_params * bits) / 8
         return size_bytes
+
