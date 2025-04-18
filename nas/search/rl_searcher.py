@@ -183,6 +183,13 @@ class RLSearcher(BaseSearcher):
         """Update policy and value networks using PPO"""
         states, actions, rewards, old_log_probs = self.experience_buffer.get_batch()
         
+        # Ensure all tensors are on the correct device
+        states = states.to(self.device)
+        rewards = rewards.to(self.device)
+        for param in actions:
+            actions[param] = actions[param].to(self.device)
+            old_log_probs[param] = old_log_probs[param].to(self.device)
+        
         # Normalize rewards
         rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-8)
         
@@ -253,3 +260,4 @@ class RLSearcher(BaseSearcher):
                 'score': self.best_score,
                 'timestamp': datetime.now().isoformat()
             }, f, indent=2)
+
