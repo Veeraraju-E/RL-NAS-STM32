@@ -12,11 +12,10 @@ from models.tiny_llm import TinyLLM
 from data.tiny_eval_dataset import get_eval_dataloaders
 
 class ModelEvaluator:
-    def __init__(self, hardware_constraints, device, batch_size=32, epochs=3, wandb_enabled=False):
+    def __init__(self, hardware_constraints, device, batch_size=32, epochs=3):
         self.hw_constraints = hardware_constraints
         self.device = device
         self.epochs = epochs
-        self.wandb_enabled = wandb_enabled
         (self.train_loader, self.val_loader), self.vocab_size = get_eval_dataloaders(batch_size=batch_size)
         
     def evaluate_architecture(self, architecture_params):
@@ -128,16 +127,15 @@ class ModelEvaluator:
         seq_length = 32  # from model config
         h = params['hidden_size']
         l = params['num_layers']
-        heads = params['num_heads']
         ff_dim = params['ff_dim']
         
         # Attention FLOPs per layer
-        attn_flops = 2 * seq_length * seq_length * h
+        attn_flops = seq_length * seq_length * h * 2
         
         # FFN FLOPs per layer
-        ffn_flops = 2 * seq_length * h * ff_dim
+        ffn_flops = seq_length * h * ff_dim * 2
         
-        total_flops = l * (attn_flops + ffn_flops)
+        total_flops = (attn_flops + ffn_flops) * l
         return total_flops
         
     def _estimate_model_size(self, params):
@@ -158,4 +156,3 @@ class ModelEvaluator:
         total_params = embedding_params + transformer_params
         size_bytes = (total_params * bits) / 8
         return size_bytes
-

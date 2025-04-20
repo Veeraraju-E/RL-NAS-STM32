@@ -72,5 +72,3 @@ def get_eval_dataloaders(batch_size=32):
     )
     
     return (train_loader, test_loader), train_dataset.vocab_size
-
-

@@ -2,4 +2,3 @@ torch
 torchtext
 matplotlib
 bayesian-optimization
-wandb

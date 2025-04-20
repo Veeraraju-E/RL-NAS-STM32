@@ -78,8 +78,6 @@ def main():
     parser.add_argument('--epochs', type=int, default=5, help='Number of epochs for training')
     parser.add_argument('--iterations', type=int, default=50, help='Number of search iterations')
     parser.add_argument('--batch-size', type=int, default=32, help='Batch size for training')
-    parser.add_argument('--project', type=str, default='tiny-llm-nas', help='WandB project name')
-    parser.add_argument('--entity', type=str, default=None, help='WandB entity/username')
     args = parser.parse_args()
 
     with open(output_dir / 'args.json', 'w') as f:
