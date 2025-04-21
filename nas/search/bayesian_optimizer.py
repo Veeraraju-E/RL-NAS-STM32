@@ -24,7 +24,6 @@ class BayesianSearcher(BaseSearcher):
         
     def search(self, num_iterations):
         """Execute Bayesian optimization search"""
-        # Create output directory for logging
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.output_dir = Path("search_results") / timestamp
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -53,12 +52,9 @@ class BayesianSearcher(BaseSearcher):
             n_iter=remaining_iter,
         )
         
-        # Save final results
         best_params = optimizer.max['params']
         self.best_score = optimizer.max['target']
         self.best_architecture = self._convert_to_arch_params(best_params)
-        
-        # Save search history and best architectures
         self._save_results()
         
         return self.best_architecture
@@ -68,10 +64,8 @@ class BayesianSearcher(BaseSearcher):
         try:
             arch_params = self._convert_to_arch_params(params)
             
-            # Validate architecture parameters
             if not self._validate_architecture(arch_params):
                 return 0.0
-            
             arch_params = {
                 k: v.to(self.device) if isinstance(v, torch.Tensor) else v 
                 for k, v in arch_params.items()
@@ -79,18 +73,15 @@ class BayesianSearcher(BaseSearcher):
             
             score = self.evaluator.evaluate_architecture(arch_params)
             
-            # Log this trial
             trial_info = {
                 'architecture': arch_params,
                 'score': score,
                 'timestamp': datetime.now().isoformat()
             }
             self.search_history.append(trial_info)
-            
-            # Update best architectures list
+
             self._update_best_architectures(arch_params, score)
-            
-            # Log current trial
+
             logging.info(f"\nTrial architecture: {arch_params}")
             logging.info(f"Trial score: {score:.4f}")
             
@@ -107,12 +98,10 @@ class BayesianSearcher(BaseSearcher):
                             'ff_dim', 'vocab_size', 'quantization_bits']:
                 # Round to nearest valid value
                 if param_name == 'hidden_size':
-                    # Ensure hidden_size is divisible by maximum num_heads
                     max_heads = max(self.search_space['num_heads'])
                     value = round(value / max_heads) * max_heads
                 elif param_name == 'num_heads':
                     value = round(value)
-                    # Ensure num_heads divides hidden_size
                     hidden_size = round(params['hidden_size'])
                     value = max(1, min(value, hidden_size))
                 else:
@@ -150,21 +139,19 @@ class BayesianSearcher(BaseSearcher):
             'score': score,
             'timestamp': datetime.now().isoformat()
         })
-        # Sort by score and keep top K
         self.best_architectures.sort(key=lambda x: x['score'], reverse=True)
         self.best_architectures = self.best_architectures[:top_k]
     
     def _save_results(self):
         """Save search results to files"""
-        # Save search history
         with open(self.output_dir / 'search_history.json', 'w') as f:
             json.dump(self.search_history, f, indent=2)
         
-        # Save best architectures
+        # top k best architectures
         with open(self.output_dir / 'best_architectures.json', 'w') as f:
             json.dump(self.best_architectures, f, indent=2)
         
-        # Save best architecture separately
+        # save best architecture separately
         with open(self.output_dir / 'best_architecture.json', 'w') as f:
             json.dump({
                 'architecture': self.best_architecture,

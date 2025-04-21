@@ -16,19 +16,15 @@ from search.rl_searcher import RLSearcher
 from search.model_evaluator import ModelEvaluator
 
 def setup_logging(output_dir):
-    # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Set up file handler
     file_handler = logging.FileHandler(output_dir / 'search.log')
     console_handler = logging.StreamHandler()
     
-    # Set up formatting
+    # fix format
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     file_handler.setFormatter(formatter)
     console_handler.setFormatter(formatter)
     
-    # Configure root logger
     logging.root.handlers = []
     logging.root.addHandler(file_handler)
     logging.root.addHandler(console_handler)
@@ -55,12 +51,11 @@ def create_searcher(strategy, search_space, hw_constraints, evaluator, device):
     )
 
 def main():
-    # Create output directory with timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = Path("runs") / timestamp
     setup_logging(output_dir)
     
-    # Save configuration
+    # Save config
     config = {
         'timestamp': timestamp,
         'search_space': search_space,
@@ -113,7 +108,6 @@ def main():
             final_score = evaluator.evaluate_architecture(best_architecture)
             logging.info(f"Final evaluation score: {final_score:.4f}")
             
-            # Save final results
             final_results = {
                 'best_architecture': best_architecture,
                 'best_score': searcher.best_score,

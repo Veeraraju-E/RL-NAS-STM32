@@ -5,8 +5,8 @@ import matplotlib.pyplot as plt
 class ScoreEvaluator:
     def __init__(self):
         self.hw_constraints = {
-            'flash_size': 128 * 1024,  # 1MB in bytes
-            'cpu_frequency': 180_000_000          # 168 MHz
+            'flash_size': 128 * 1024,
+            'cpu_frequency': 180_000_000    # 180MHz
         }
 
         self.accuracy_scores = []

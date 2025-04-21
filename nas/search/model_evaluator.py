@@ -3,7 +3,6 @@ import torch.nn.functional as F
 import sys
 from pathlib import Path
 
-# Add the parent directory to system path
 current_dir = Path(__file__).resolve().parent
 parent_dir = current_dir.parent
 sys.path.append(str(parent_dir))
@@ -24,12 +23,10 @@ class ModelEvaluator:
         Returns a score between 0 and 1
         """
         
-        # 1. Check hardware constraints
         model_size = self._estimate_model_size(architecture_params)
         if model_size > self.hw_constraints['flash_size']:
             return 0.0
             
-        # 2. Create and evaluate model
         try:
             model = TinyLLM(
                 num_layers=int(architecture_params['num_layers']),
@@ -46,13 +43,12 @@ class ModelEvaluator:
             print(f"Error evaluating architecture: {e}")
             return 0.0
             
-        # 3. Hardware efficiency metrics
         flops = self._estimate_flops(architecture_params)
         inf_time = flops / self.hw_constraints['cpu_frequency']
         size_score = 1 - model_size/self.hw_constraints['flash_size']
         speed_score = 1 - inf_time/100
         
-        # Combined score with accuracy
+        # Combined score
         score = (
             0.5 * accuracy +           # actual model performance
             0.25 * size_score +        # size efficiency
@@ -68,11 +64,9 @@ class ModelEvaluator:
         best_accuracy = 0.0
         
         for epoch in range(self.epochs):
-            # Training phase
             model.train()
             total_loss = 0
             for batch_idx, (x, y) in enumerate(self.train_loader):
-                # Ensure input matches model's sequence length
                 if x.size(1) > model.seq_length:
                     x = x[:, :model.seq_length]
                     y = y[:, :model.seq_length]
@@ -92,14 +86,12 @@ class ModelEvaluator:
                 if batch_idx % 100 == 0:
                     print(f'Epoch: {epoch}, Batch: {batch_idx}, Loss: {loss.item():.4f}')
 
-            # Evaluation phase
             model.eval()
             correct = 0
             total = 0
             val_loss = 0
             with torch.no_grad():
                 for x, y in self.val_loader:
-                    # Apply same sequence length handling for validation
                     if x.size(1) > model.seq_length:
                         x = x[:, :model.seq_length]
                         y = y[:, :model.seq_length]
@@ -123,16 +115,14 @@ class ModelEvaluator:
 
     def _estimate_flops(self, params):
         """Estimate computational complexity"""
-        # Transformer FLOPs estimation
+        # FLOPs estimation
         seq_length = 32  # from model config
         h = params['hidden_size']
         l = params['num_layers']
         ff_dim = params['ff_dim']
         
-        # Attention FLOPs per layer
         attn_flops = seq_length * seq_length * h * 2
         
-        # FFN FLOPs per layer
         ffn_flops = seq_length * h * ff_dim * 2
         
         total_flops = (attn_flops + ffn_flops) * l
@@ -150,7 +140,7 @@ class ModelEvaluator:
         embedding_params = v * h
         transformer_params = l * (
             4 * h * h +  # attention matrices
-            2 * h * ff_dim  # feedforward layers
+            2 * h * ff_dim  # ff layers
         )
         
         total_params = embedding_params + transformer_params
