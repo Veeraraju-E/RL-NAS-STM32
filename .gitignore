@@ -4,3 +4,5 @@ __pycache__/*
 runs/
 search_results/
 *.pyc
+*.zip
+*.pdf

@@ -18,7 +18,7 @@ class PolicyNetwork(nn.Module):
             nn.ReLU()
         )
         
-        # Separate output heads for each architecture param
+        # Separate output heads for each architecture parameter
         self.heads = nn.ModuleDict({
             param: nn.Linear(256, dim) 
             for param, dim in action_dims.items()

@@ -22,27 +22,32 @@ class RLSearcher(BaseSearcher):
         self.device = device
         self.experience_buffer = ExperienceBuffer()
         
-        # space to action dimensions
+        # Convert search space to action dimensions
         self.action_dims = self._create_action_dims()
         
-        # State dimension
+        # State dimension: current architecture parameters + hardware constraints
         self.state_dim = len(self.search_space) + len(self.hw_constraints)
-
-        # networks
+        
+        # Initialize networks
         self.policy_net = PolicyNetwork(self.state_dim, self.action_dims).to(device)
         self.value_net = ValueNetwork(self.state_dim).to(device)
+        
+        # Initialize optimizers
         self.policy_optimizer = optim.Adam(self.policy_net.parameters(), lr=3e-4)
         self.value_optimizer = optim.Adam(self.value_net.parameters(), lr=1e-3)
         
-        # PPO hyperparams
+        # PPO hyperparameters
         self.clip_epsilon = 0.2
         self.entropy_coef = 0.01
         self.value_coef = 0.5
         self.ppo_epochs = 10
         self.batch_size = 32
         
+        # Initialize tracking variables
         self.search_history = []
-        self.best_architectures = []        
+        self.best_architectures = []
+        
+        # Initialize best_architecture with middle values from search space
         self.best_architecture = {}
         for param, values in self.search_space.items():
             if isinstance(values, tuple):
@@ -59,12 +64,12 @@ class RLSearcher(BaseSearcher):
         logging.info("Starting RL-based architecture search...")
         
         for iteration in range(num_iterations):
-            # evaluate generated architecture
+            # Generate and evaluate architecture
             state = self._get_current_state()
             architecture, log_probs = self._sample_architecture(state)
             score = self.evaluator.evaluate_architecture(architecture)
             
-            # experience
+            # Store experience
             self.experience_buffer.add(
                 state=state,
                 actions=self._architecture_to_actions(architecture),
@@ -72,24 +77,28 @@ class RLSearcher(BaseSearcher):
                 log_probs=log_probs
             )
             
+            # Update best architecture
             if score > self.best_score:
                 self.best_score = score
                 self.best_architecture = architecture
                 self._update_best_architectures(architecture, score)
             
+            # Log progress
             logging.info(f"\nIteration {iteration + 1}/{num_iterations}")
             logging.info(f"Current architecture: {architecture}")
             logging.info(f"Score: {score:.4f}")
             logging.info(f"Best score so far: {self.best_score:.4f}")
             
-            # Update policy when enough experiences collected
+            # Update policy if enough experiences collected
             if len(self.experience_buffer.buffer) >= self.batch_size:
                 self._update_policy()
                 self.experience_buffer.clear()
             
+            # Save intermediate results
             if (iteration + 1) % 10 == 0:
                 self._save_results()
         
+        # Final save
         self._save_results()
         return self.best_architecture
     
@@ -98,14 +107,17 @@ class RLSearcher(BaseSearcher):
         action_dims = {}
         for param, values in self.search_space.items():
             if isinstance(values, tuple):
+                # For continuous values, discretize into bins
                 num_bins = 10
                 action_dims[param] = num_bins
             else:
+                # For discrete values, use number of possible values
                 action_dims[param] = len(values)
         return action_dims
     
     def _get_current_state(self):
         """Create state vector from current architecture and constraints"""
+        # Normalize architecture parameters
         arch_state = []
         for param, values in self.search_space.items():
             if isinstance(values, tuple):
@@ -113,15 +125,16 @@ class RLSearcher(BaseSearcher):
                 normalized = (self.best_architecture[param] - values[0]) / (values[1] - values[0])
                 arch_state.append(normalized)
             else:
-                # One-hot encode
+                # One-hot encode discrete values
                 idx = values.index(self.best_architecture[param])
                 normalized = idx / len(values)
                 arch_state.append(normalized)
         
+        # Normalize hardware constraints
         hw_state = [
-            self.hw_constraints['flash_size'] / (1024 * 1024),  # MB
-            self.hw_constraints['ram_size'] / (1024 * 1024),    # MB
-            self.hw_constraints['cpu_frequency'] / 1_000_000    # MHz
+            self.hw_constraints['flash_size'] / (1024 * 1024),  # Normalize to MB
+            self.hw_constraints['ram_size'] / (1024 * 1024),    # Normalize to MB
+            self.hw_constraints['cpu_frequency'] / 1_000_000    # Normalize to MHz
         ]
         
         return torch.tensor(arch_state + hw_state, dtype=torch.float32, device=self.device)
@@ -136,12 +149,12 @@ class RLSearcher(BaseSearcher):
         architecture = {}
         
         for param, probs in action_probs.items():
-            # sample action using probs
+            # Sample action using probabilities
             dist = torch.distributions.Categorical(probs)
             action = dist.sample()
             log_prob = dist.log_prob(action)
             
-            # Convert action to architecture param
+            # Convert action to architecture parameter
             if isinstance(self.search_space[param], tuple):
                 min_val, max_val = self.search_space[param]
                 value = min_val + (action.item() / (self.action_dims[param] - 1)) * (max_val - min_val)
@@ -169,19 +182,26 @@ class RLSearcher(BaseSearcher):
     def _update_policy(self):
         """Update policy and value networks using PPO"""
         states, actions, rewards, old_log_probs = self.experience_buffer.get_batch()
+        
+        # Ensure all tensors are on the correct device
         states = states.to(self.device)
         rewards = rewards.to(self.device)
         for param in actions:
             actions[param] = actions[param].to(self.device)
             old_log_probs[param] = old_log_probs[param].to(self.device)
+        
+        # Normalize rewards
         rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-8)
         
         for _ in range(self.ppo_epochs):
-            # curr action probs and values
+            # Get current action probabilities and values
             action_probs = self.policy_net(states)
             values = self.value_net(states).squeeze()
+            
+            # Calculate advantages
             advantages = rewards - values.detach()
             
+            # Calculate policy loss
             policy_loss = 0
             entropy_loss = 0
             for param in self.action_dims.keys():
@@ -189,23 +209,24 @@ class RLSearcher(BaseSearcher):
                 new_log_probs = dist.log_prob(actions[param])
                 entropy = dist.entropy().mean()
                 
-                # PPO loss
+                # PPO policy loss
                 ratio = torch.exp(new_log_probs - old_log_probs[param])
                 surr1 = ratio * advantages
                 surr2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * advantages
                 policy_loss -= torch.min(surr1, surr2).mean()
                 entropy_loss -= entropy
             
+            # Calculate value loss
             value_loss = F.mse_loss(values, rewards)
             
-            # Total  loss
+            # Combined loss
             total_loss = (
                 policy_loss +
                 self.value_coef * value_loss +
                 self.entropy_coef * entropy_loss
             )
             
-            # update networks
+            # Update networks
             self.policy_optimizer.zero_grad()
             self.value_optimizer.zero_grad()
             total_loss.backward()
@@ -213,6 +234,7 @@ class RLSearcher(BaseSearcher):
             self.value_optimizer.step()
     
     def _update_best_architectures(self, architecture, score, top_k=5):
+        """Keep track of top K architectures"""
         self.best_architectures.append({
             'architecture': architecture,
             'score': score,
@@ -222,14 +244,16 @@ class RLSearcher(BaseSearcher):
         self.best_architectures = self.best_architectures[:top_k]
     
     def _save_results(self):
+        """Save search results to files"""
+        # Save search history
         with open(self.output_dir / 'search_history.json', 'w') as f:
             json.dump(self.search_history, f, indent=2)
         
-        # Top k best architectures
+        # Save best architectures
         with open(self.output_dir / 'best_architectures.json', 'w') as f:
             json.dump(self.best_architectures, f, indent=2)
         
-        # save best architecture separately
+        # Save best architecture separately
         with open(self.output_dir / 'best_architecture.json', 'w') as f:
             json.dump({
                 'architecture': self.best_architecture,

@@ -78,5 +78,3 @@ class TransformerLayer(nn.Module):
         ff_out = self.feed_forward(x)
         x = self.norm2(x + ff_out)
         return x
-
-

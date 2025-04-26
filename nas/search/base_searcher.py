@@ -21,7 +21,7 @@ class BaseSearcher(ABC):
         if not self._meets_hardware_constraints(architecture):
             return float('-inf')
             
-        # TODO: Implement actual evaluation - in child classes
+        # TODO: Implement actual evaluation
         return 0.0
     
     def _meets_hardware_constraints(self, architecture):
